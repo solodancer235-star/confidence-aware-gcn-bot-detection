@@ -1,0 +1,144 @@
+{
+ "desc": {
+  "edges": 84462,
+  "edge_homophily": 0.6167507281380976,
+  "runs": [
+   {
+    "fold": 0,
+    "mean_conf": 0.7360366582870483,
+    "conf_q10": 0.5738962292671204,
+    "conf_q90": 0.9000111222267151,
+    "mean_abs_rel_dev_from_uniform": 0.06393907311771338,
+    "median_max_min_ratio": 1.4399772882461548,
+    "p95_max_min_ratio": 1.7990738153457642,
+    "auroc_conf_vs_correct_test": 0.658998550907258,
+    "acc_test": 0.744
+   },
+   {
+    "fold": 1,
+    "mean_conf": 0.739933967590332,
+    "conf_q10": 0.5762263536453247,
+    "conf_q90": 0.8979482650756836,
+    "mean_abs_rel_dev_from_uniform": 0.06586829592652275,
+    "median_max_min_ratio": 1.4589712619781494,
+    "p95_max_min_ratio": 1.8280726671218872,
+    "auroc_conf_vs_correct_test": 0.6751828135100194,
+    "acc_test": 0.728
+   },
+   {
+    "fold": 2,
+    "mean_conf": 0.7441478371620178,
+    "conf_q10": 0.575941264629364,
+    "conf_q90": 0.9225713014602661,
+    "mean_abs_rel_dev_from_uniform": 0.066161425563464,
+    "median_max_min_ratio": 1.4664945602416992,
+    "p95_max_min_ratio": 1.8414264917373657,
+    "auroc_conf_vs_correct_test": 0.6583388541283279,
+    "acc_test": 0.715
+   },
+   {
+    "fold": 3,
+    "mean_conf": 0.7357861995697021,
+    "conf_q10": 0.574359118938446,
+    "conf_q90": 0.9053366184234619,
+    "mean_abs_rel_dev_from_uniform": 0.0627769639768262,
+    "median_max_min_ratio": 1.4263348579406738,
+    "p95_max_min_ratio": 1.8190361261367798,
+    "auroc_conf_vs_correct_test": 0.6533348187759953,
+    "acc_test": 0.748
+   },
+   {
+    "fold": 4,
+    "mean_conf": 0.7292490601539612,
+    "conf_q10": 0.5619397759437561,
+    "conf_q90": 0.8902533054351807,
+    "mean_abs_rel_dev_from_uniform": 0.06451012261143904,
+    "median_max_min_ratio": 1.448407530784607,
+    "p95_max_min_ratio": 1.820021629333496,
+    "auroc_conf_vs_correct_test": 0.6780137931034483,
+    "acc_test": 0.725
+   }
+  ],
+  "mean": {
+   "mean_conf": 0.7370307445526123,
+   "conf_q10": 0.5724725484848022,
+   "conf_q90": 0.9032241225242614,
+   "mean_abs_rel_dev_from_uniform": 0.06465117623919307,
+   "median_max_min_ratio": 1.4480370998382568,
+   "p95_max_min_ratio": 1.8215261459350587,
+   "auroc_conf_vs_correct_test": 0.6647737660850097,
+   "acc_test": 0.732
+  }
+ },
+ "feat": {
+  "edges": 77696,
+  "edge_homophily": 0.7560234761120264,
+  "runs": [
+   {
+    "fold": 0,
+    "mean_conf": 0.8303224444389343,
+    "conf_q10": 0.6133682727813721,
+    "conf_q90": 0.9856751561164856,
+    "mean_abs_rel_dev_from_uniform": 0.07305465779768945,
+    "median_max_min_ratio": 1.3893029689788818,
+    "p95_max_min_ratio": 1.863974690437317,
+    "auroc_conf_vs_correct_test": 0.783527633418277,
+    "acc_test": 0.817
+   },
+   {
+    "fold": 1,
+    "mean_conf": 0.8421792984008789,
+    "conf_q10": 0.6267165541648865,
+    "conf_q90": 0.9867693781852722,
+    "mean_abs_rel_dev_from_uniform": 0.0692735562445314,
+    "median_max_min_ratio": 1.350530743598938,
+    "p95_max_min_ratio": 1.8476988077163696,
+    "auroc_conf_vs_correct_test": 0.756773011837393,
+    "acc_test": 0.822
+   },
+   {
+    "fold": 2,
+    "mean_conf": 0.8318117260932922,
+    "conf_q10": 0.6143069863319397,
+    "conf_q90": 0.9867106080055237,
+    "mean_abs_rel_dev_from_uniform": 0.07247769281581957,
+    "median_max_min_ratio": 1.3752992153167725,
+    "p95_max_min_ratio": 1.8538603782653809,
+    "auroc_conf_vs_correct_test": 0.7787221986117013,
+    "acc_test": 0.819
+   },
+   {
+    "fold": 3,
+    "mean_conf": 0.8335074186325073,
+    "conf_q10": 0.6236792206764221,
+    "conf_q90": 0.9842936992645264,
+    "mean_abs_rel_dev_from_uniform": 0.07073965127717428,
+    "median_max_min_ratio": 1.3674285411834717,
+    "p95_max_min_ratio": 1.8586978912353516,
+    "auroc_conf_vs_correct_test": 0.7551232899382172,
+    "acc_test": 0.824
+   },
+   {
+    "fold": 4,
+    "mean_conf": 0.8330627679824829,
+    "conf_q10": 0.6151212453842163,
+    "conf_q90": 0.9848805665969849,
+    "mean_abs_rel_dev_from_uniform": 0.07151414041524014,
+    "median_max_min_ratio": 1.3715561628341675,
+    "p95_max_min_ratio": 1.8577734231948853,
+    "auroc_conf_vs_correct_test": 0.7797898922593298,
+    "acc_test": 0.818
+   }
+  ],
+  "mean": {
+   "mean_conf": 0.8341767311096191,
+   "conf_q10": 0.6186384558677673,
+   "conf_q90": 0.9856658816337586,
+   "mean_abs_rel_dev_from_uniform": 0.07141193971009097,
+   "median_max_min_ratio": 1.3708235263824462,
+   "p95_max_min_ratio": 1.8564010381698608,
+   "auroc_conf_vs_correct_test": 0.7707872052129836,
+   "acc_test": 0.82
+  }
+ }
+}

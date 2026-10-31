@@ -1,0 +1,24 @@
+# Основные библиотеки для работы с графами и данными
+networkx>=2.8.0
+numpy>=1.21.0
+matplotlib>=3.5.0
+
+# Машинное обучение и обработка текста
+sentence-transformers>=2.2.0
+scikit-learn>=1.0.0
+scipy>=1.8.0
+
+# Глубокое обучение
+torch>=1.9.0
+torch-geometric>=2.0.0
+
+# Обнаружение сообществ
+leidenalg>=0.9.0
+python-igraph>=0.10.0
+
+# Дополнительные зависимости
+urllib3>=2.0.0
+requests>=2.32.0
+tqdm>=4.64.0
+praw>=7.7.0
+pandas>=1.5.0

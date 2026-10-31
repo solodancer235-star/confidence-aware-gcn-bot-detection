@@ -1,0 +1,23 @@
+{
+  "mlp": {
+    "lr": 0.005,
+    "weight_decay": 0.0005
+  },
+  "gcn": {
+    "lr": 0.01,
+    "weight_decay": 5e-05
+  },
+  "sage": {
+    "lr": 0.005,
+    "weight_decay": 0.0005
+  },
+  "gat": {
+    "heads": 1,
+    "lr": 0.005,
+    "weight_decay": 0.0005
+  },
+  "confgcn": {
+    "lr": 0.01,
+    "weight_decay": 5e-05
+  }
+}
