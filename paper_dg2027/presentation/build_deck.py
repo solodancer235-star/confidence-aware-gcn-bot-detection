@@ -175,10 +175,10 @@ tb(s, 0.5, 1.6, 5.2, 2.6, [
     "Bots inflate metrics and spread disinformation; they act in coordinated clusters",
     "Per-account classifiers miss this structure; GNNs propagate signal along edges",
     "A GCN weights every neighbor by degree only: a borderline account counts as much as a confident one",
-    "Hypothesis of our earlier work: down-weight low-confidence neighbors",
+    "Hypothesis: down-weight low-confidence neighbors",
 ], size=16, bullet=True, color=GRAY, space=8)
 card(s, 0.5, 4.6, 5.2, 1.7, name="Prior result card")
-tb(s, 0.7, 4.7, 4.9, 0.4, "Earlier single-split result (DG 2026)", size=15, bold=True)
+tb(s, 0.7, 4.7, 4.9, 0.4, "Preliminary single-split result", size=15, bold=True)
 tb(s, 0.7, 5.15, 2.3, 1.0, [[("+3.0", {"size": 32, "bold": True, "color": BLUE})], [("precision points", {"size": 13, "color": GRAY})]])
 tb(s, 3.1, 5.15, 2.5, 1.0, [[("−7.6", {"size": 32, "bold": True, "color": ORANGE})], [("recall points", {"size": 13, "color": GRAY})]])
 s.shapes.add_picture("fig1_synthetic_graph.png", Inches(6.0), Inches(1.15), width=Inches(3.6))
@@ -186,7 +186,7 @@ tb(s, 6.0, 4.15, 3.6, 0.9, "Synthetic social graph: humans (green) and two dense
 tb(s, 6.0, 5.0, 3.6, 1.3, [[("Question of this paper: ", {"bold": True, "color": NAVY}),
                             ("is that gain real, and what really helps?", {"color": NAVY})]], size=16)
 notes(s, "Bots are coordinated, so graph models are attractive. A GCN treats confident and borderline neighbours equally. "
-         "Last year we proposed to reweight by confidence and saw a precision gain on one split. Today we test it properly.")
+         "A preliminary experiment that reweights by confidence showed a precision gain on one split. Today we test it properly.")
 
 # ---------------------------------------------------------------- 3. method
 s = slides[2]
