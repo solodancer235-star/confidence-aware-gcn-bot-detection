@@ -54,3 +54,43 @@ def test_confidence_not_a_parameter_and_no_grad():
     assert not m.confidence.requires_grad
     assert all(p is not m.confidence for p in m.parameters())
     assert float(m.confidence.min()) >= 0.5 - 1e-6 and float(m.confidence.max()) <= 1 + 1e-6
+
+
+def test_confidence_gcnconv_equals_gcnconv_for_constant_confidence():
+    from torch_geometric.nn import GCNConv
+    from confgcn.layers import ConfidenceGCNConv
+    x, ei = _graph()
+    ref = GCNConv(8, 4)
+    conv = ConfidenceGCNConv(8, 4)
+    conv.lin.weight.data.copy_(ref.lin.weight.data)
+    conv.bias.data.copy_(ref.bias.data)
+    for s in (torch.ones(x.size(0)), 0.7 * torch.ones(x.size(0))):
+        assert torch.allclose(conv(x, ei, s), ref(x, ei), atol=1e-5)
+
+
+def test_confidence_gcnconv_preserves_row_mass():
+    from confgcn.layers import ConfidenceGCNConv
+    x, ei = _graph()
+    conv = ConfidenceGCNConv(8, 4)
+    c = torch.rand(x.size(0)) * 0.5 + 0.5
+    e1, w1 = conv.edge_weights(ei, torch.ones_like(c), x.size(0))
+    e2, w2 = conv.edge_weights(ei, c, x.size(0))
+    r1 = scatter(w1, e1[1], dim=0, dim_size=x.size(0), reduce="sum")
+    r2 = scatter(w2, e2[1], dim=0, dim_size=x.size(0), reduce="sum")
+    assert torch.allclose(r1, r2, atol=1e-5)
+
+
+def test_adaptive_alpha_zero_is_baseline_and_alpha_gets_gradient():
+    from confgcn.models import AdaptiveConfidenceGNN
+    x, ei = _graph()
+    m = AdaptiveConfidenceGNN(8, alpha_init=1.0)
+    m.eval()
+    m.confidence = torch.rand(x.size(0)) * 0.5 + 0.5
+    out = m(x, ei)
+    out.sum().backward()
+    assert m.rho.grad is not None and torch.isfinite(m.rho.grad).all()
+    m0 = AdaptiveConfidenceGNN(8, alpha_init=0.0, learn_alpha=False)
+    m0.eval()
+    a = m0(x, ei)
+    m0.confidence = torch.rand(x.size(0)) * 0.5 + 0.5
+    assert torch.allclose(a, m0(x, ei), atol=1e-5)

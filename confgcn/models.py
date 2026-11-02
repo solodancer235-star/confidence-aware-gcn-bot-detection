@@ -12,7 +12,9 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch_geometric.nn import GATConv, GCNConv, SAGEConv
 
-from .layers import ConfidenceWeightedConv
+import math
+
+from .layers import ConfidenceGCNConv, ConfidenceSAGEConv, ConfidenceWeightedConv
 
 CONF_MODES = ("conf", "uniform", "shuffle", "inverted")
 
@@ -132,6 +134,70 @@ class ConfidenceAwareGCN(_Stack):
         return raw
 
 
+class AdaptiveConfidenceGNN(_Stack):
+    """Confidence-aware GNN v2 (``base='gcn'`` -> AC-GCN, ``base='sage'`` -> AC-SAGE).
+
+    * confidence modulates the *baseline's own* normalisation (GCN: symmetric
+      with self-loops; SAGE: neighbour mean next to a root transform), so with
+      alpha = 0 the model is exactly the baseline;
+    * s_j = c_j ** alpha_l with a learnable, layer-wise exponent
+      alpha_l = softplus(rho_l) >= 0 (3 scalar parameters). Large alpha removes
+      the factor-2 bound on neighbour influence of the fixed alpha = 1 model.
+    """
+
+    def __init__(self, in_dim, hidden=64, out_dim=2, layers=3, dropout=0.5, base="gcn",
+                 alpha_init=1.0, learn_alpha=True, signal="node"):
+        assert signal in ("node", "agree")
+        assert not (signal == "agree" and base != "gcn")
+        self_signal = signal
+        d = _dims(in_dim, hidden, out_dim, layers)
+        conv = {"gcn": ConfidenceGCNConv, "sage": ConfidenceSAGEConv}[base]
+        super().__init__([conv(d[i], d[i + 1]) for i in range(layers)], dropout)
+        rho = math.log(math.expm1(alpha_init)) if alpha_init > 0 else -20.0
+        init = torch.full((layers,), rho)
+        if learn_alpha:
+            self.rho = nn.Parameter(init)
+        else:
+            self.register_buffer("rho", init)
+        self.signal = self_signal
+        self.confidence: Tensor | None = None
+        self.prob: Tensor | None = None
+
+    @property
+    def alpha(self) -> Tensor:
+        return F.softplus(self.rho)
+
+    def forward(self, x: Tensor, edge_index: Tensor) -> Tensor:
+        n = x.size(0)
+        if self.confidence is None or self.confidence.numel() != n:
+            self.confidence = torch.ones(n, device=x.device)
+        logc = self.confidence.clamp_min(1e-6).log()
+        alpha = self.alpha
+        prob = self.prob if self.prob is not None and self.prob.size(0) == n else None
+        for i, conv in enumerate(self.convs):
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            if self.signal == "agree":
+                if prob is None:
+                    sw = torch.ones(n, device=x.device)
+                else:
+                    a_i = alpha[i]
+                    sw = lambda src, dst, a_i=a_i: torch.exp(  # noqa: E731
+                        a_i * (prob[src] * prob[dst]).sum(-1).clamp_min(1e-6).log())
+            else:
+                sw = torch.exp(alpha[i] * logc)
+            x = conv(x, edge_index, sw)
+            if i < len(self.convs) - 1:
+                x = F.relu(x)
+        return x
+
+    @torch.no_grad()
+    def update_confidence(self, logits: Tensor, generator=None) -> Tensor:
+        p = F.softmax(logits, dim=-1).detach()
+        c = p.max(dim=-1).values
+        self.confidence, self.prob = c, p
+        return c.clone()
+
+
 def build_model(name: str, in_dim: int, **kw) -> nn.Module:
     name = name.lower()
     if name == "mlp":
@@ -145,4 +211,9 @@ def build_model(name: str, in_dim: int, **kw) -> nn.Module:
     if name == "confgcn":
         return ConfidenceAwareGCN(in_dim, mode=kw.get("mode", "conf"), alpha=kw.get("alpha", 1.0),
                                   self_loop=kw.get("self_loop", False))
+    if name in ("acgcn", "acsage", "cagree"):
+        base = "sage" if name == "acsage" else "gcn"
+        return AdaptiveConfidenceGNN(in_dim, base=base, alpha_init=kw.get("alpha_init", 1.0),
+                                     learn_alpha=kw.get("learn_alpha", True),
+                                     signal="agree" if name == "cagree" else "node")
     raise ValueError(name)

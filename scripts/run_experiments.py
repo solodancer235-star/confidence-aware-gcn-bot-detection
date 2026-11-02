@@ -6,6 +6,10 @@ Groups
   ablation  uniform / shuffled / inverted confidence, alpha, self-loop
   density   k in {5, 20} for GCN and Conf-GCN (k = 10 is in `main`)
   graph     k-NN graph built on description + metadata instead of description only
+  v2        future-work extensions (learnable alpha, AC-SAGE, agreement weights, self-training)
+  meta      metadata-only k-NN graph
+  meta2     remaining models and extensions on the metadata graph
+  labels    label-scarce regime (2/5/10 % labelled nodes), feature graph
 
 Every run is appended to results/runs_<tag>.csv and its validation/test
 probabilities to results/probs/<variant>/<seed>_<fold>.npz, so the script is
@@ -75,12 +79,28 @@ def graph(k, kind="desc"):
     return _graphs[(k, kind)]
 
 
-def run_variant(variant, group, model, k=10, seeds=None, save_probs=True, graph_kind="desc", **kw):
+def label_splits(y, frac, reps=10):
+    """Label-scarce splits: fixed 20 % test and 20 % validation, and a stratified
+    training set of ``frac`` x |V| labelled nodes drawn from the rest."""
+    from sklearn.model_selection import train_test_split
+    idx = np.arange(len(y))
+    for rep in range(reps):
+        rest, te = train_test_split(idx, test_size=0.2, stratify=y, random_state=rep)
+        rest2, va = train_test_split(rest, test_size=0.25, stratify=y[rest], random_state=rep)
+        tr, _ = train_test_split(rest2, train_size=int(round(frac * len(y))), stratify=y[rest2],
+                                 random_state=rep)
+        yield rep, rep, np.sort(tr), np.sort(va), np.sort(te)
+
+
+def run_variant(variant, group, model, k=10, seeds=None, save_probs=True, graph_kind="desc",
+                label_frac=None, **kw):
     if a.only and variant not in a.only:
         return
     have = done_keys()
     g = graph(k, graph_kind)
-    for seed, fold, tr, va, te in cv_splits(g.y, seeds=tuple(seeds or a.seeds)):
+    splits = (label_splits(g.y, label_frac) if label_frac is not None
+              else cv_splits(g.y, seeds=tuple(seeds or a.seeds)))
+    for seed, fold, tr, va, te in splits:
         if (variant, seed, fold) in have:
             continue
         t0 = time.time()
@@ -91,7 +111,9 @@ def run_variant(variant, group, model, k=10, seeds=None, save_probs=True, graph_
                    **{f"val_{m}": v for m, v in r.val.items()},
                    **{f"test_{m}": v for m, v in r.test.items()},
                    final_loss=r.loss[-1], loss_curve=json.dumps([round(v, 5) for v in r.loss]),
-                   conf_curve=json.dumps([round(v, 5) for v in r.mean_conf]))
+                   conf_curve=json.dumps([round(v, 5) for v in r.mean_conf]),
+                   alpha_final=json.dumps(r.alpha[-1] if r.alpha else None),
+                   label_frac=label_frac)
         record(row)
         if save_probs:
             d = f"{a.out}/probs/{variant}"
@@ -155,3 +177,43 @@ if "graph" in a.group:
     hp = selected()
     for model in ("gcn", "confgcn", "sage", "gat"):
         run_variant(f"{model}_featgraph", "graph", model, graph_kind="feat", **hp[model])
+
+# ---------------------------------------------------------------- extensions (future work)
+V2 = [  # name, model, hp-source, extra kwargs
+    ("acgcn", "acgcn", "gcn", {}),                       # learnable alpha on GCN normalisation
+    ("acsage", "acsage", "sage", {}),                    # learnable alpha on SAGE mean
+    ("cagree", "cagree", "gcn", {}),                     # edge weights from endpoint agreement
+    ("gcn_st", "gcn", "gcn", dict(self_train=True)),     # pseudo-label self-training
+    ("sage_st", "sage", "sage", dict(self_train=True)),
+    ("acgcn_st", "acgcn", "gcn", dict(self_train=True)),
+    ("acsage_st", "acsage", "sage", dict(self_train=True)),
+]
+if "v2" in a.group:
+    hp = selected()
+    for name, model, src, kw in V2:
+        run_variant(f"{name}_featgraph", "v2", model, graph_kind="feat", **hp[src], **kw)
+    for name, model, src, kw in V2[:3]:
+        run_variant(f"{name}", "v2", model, graph_kind="desc", **hp[src], **kw)
+
+if "meta" in a.group:
+    hp = selected()
+    for model in ("gcn", "sage"):
+        run_variant(f"{model}_metagraph", "meta", model, graph_kind="meta", **hp[model])
+
+LABEL_MODELS = [("mlp", "mlp", "mlp", {}), ("gcn", "gcn", "gcn", {}), ("sage", "sage", "sage", {}),
+                ("acgcn", "acgcn", "gcn", {}), ("acsage", "acsage", "sage", {}),
+                ("gcn_st", "gcn", "gcn", dict(self_train=True)),
+                ("sage_st", "sage", "sage", dict(self_train=True))]
+if "labels" in a.group:
+    hp = selected()
+    for frac in (0.02, 0.05, 0.10):
+        for name, model, src, kw in LABEL_MODELS:
+            run_variant(f"{name}_lab{frac}", "labels", model, graph_kind="feat", label_frac=frac,
+                        **hp[src], **kw)
+
+if "meta2" in a.group:  # complete the metadata-graph column and extensions on the best graph
+    hp = selected()
+    for model in ("gat", "confgcn"):
+        run_variant(f"{model}_metagraph", "meta", model, graph_kind="meta", **hp[model])
+    for name, model, src, kw in [V2[0], V2[1], V2[4]]:  # acgcn, acsage, sage_st
+        run_variant(f"{name}_metagraph", "meta", model, graph_kind="meta", **hp[src], **kw)

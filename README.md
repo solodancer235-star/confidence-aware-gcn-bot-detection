@@ -1,8 +1,8 @@
 # Confidence-Aware GCN for Social Bot Detection
 
-Code, experiments and paper for **"Confidence-Aware Graph Convolutional Networks
-for Social Bot Detection: A Message-Passing Reweighting Approach"**
-(K. Kassymkhan, Astana IT University).
+Code, experiments and paper for **"Confidence-Aware Graph Neural Networks for Social
+Bot Detection: Message-Passing Reweighting and Similarity-Graph Construction"**
+(K. Kassymkhan, Astana IT University; L. L. La, L.N. Gumilyov Eurasian National University).
 
 A Confidence-Aware GCN reweights every message `j → i` by the model's own
 confidence in neighbour `j` (max softmax probability from the previous epoch),
@@ -18,34 +18,41 @@ No extra learnable parameters; confidence is a plain tensor updated under
 
 ## Main results (Twitter, 5 000 accounts, 5-fold CV × 5 seeds)
 
-| Model | Prec. | Rec. | F1 | AUROC |
-|---|---|---|---|---|
-| MLP (no graph) | 0.805 | 0.809 | **0.807** | **0.890** |
-| GCN | 0.731 | 0.752 | 0.740 | 0.819 |
-| GraphSAGE | 0.805 | 0.801 | 0.803 | 0.887 |
-| GAT | 0.744 | 0.726 | 0.734 | 0.819 |
-| Conf-GCN | 0.732 | 0.732 | 0.731 | 0.794 |
+**Best detector: GraphSAGE on a metadata k-NN graph — F1 0.840, AUROC 0.921**
+(+3.2 F1 over a feature-only MLP, +9.9 F1 over the original GCN-on-descriptions
+pipeline, p < 1e-6).
 
-* The +3.0-point precision gain from the earlier single-split experiment **does
-  not replicate** (Conf-GCN vs GCN precision 0.732 vs 0.731, p = 0.83).
-* Uniform / shuffled / inverted confidence reproduce Conf-GCN → the effect comes
-  from the normalisation (mean aggregation, no self-loop), not from confidence.
-  Confidence weights deviate from uniform by only ~6.5 %.
-* **Graph construction matters most:** a k-NN graph over description + metadata
-  (homophily 0.76 vs 0.62) lifts every GNN above the MLP
-  (GraphSAGE 0.825, GCN 0.820, Conf-GCN 0.818, GAT 0.814 F1).
+| Model | Description graph F1 | Metadata graph F1 | Feature graph F1 |
+|---|---|---|---|
+| GCN | 0.740 | 0.826 | 0.820 |
+| GraphSAGE | 0.803 | **0.840** | 0.825 |
+| GAT | 0.734 | 0.823 | 0.814 |
+| Conf-GCN | 0.731 | 0.824 | 0.818 |
+| MLP (no graph) | 0.807 | 0.807 | 0.807 |
 
-Full tables: [`results/summary.md`](results/summary.md); paper:
-[`paper/main.pdf`](paper/main.pdf) (source `paper/main.tex`).
+* **Graph construction is decisive:** description graph (edge homophily 0.62)
+  → every GCN-type model is worse than the MLP; metadata graph (0.78) → every
+  GNN beats it.
+* **Few labels:** with 100 / 250 / 500 labelled accounts GraphSAGE +
+  confidence-based self-training is the best model (F1 0.764 / 0.781 / 0.795
+  vs MLP 0.744 / 0.761 / 0.773).
+* **Confidence reweighting:** the adaptive variants (AC-GCN / AC-SAGE, learnable
+  exponent on top of the baseline normalisation) fix the AUROC loss of the
+  original Conf-GCN and stay within 0.5 F1 of their baselines, but do not beat
+  them; learned exponents shrink from 1 to ≈0.6–0.8. The earlier single-split
+  precision gain of Conf-GCN does not replicate.
+
+Full tables: [`results/summary.md`](results/summary.md), [`results/summary.json`](results/summary.json);
+paper: [`paper/main.pdf`](paper/main.pdf) (source `paper/main.tex`).
 
 ## Repository layout
 
 ```
 confgcn/            library
-  layers.py         ConfidenceWeightedConv (PyG MessagePassing)
-  models.py         MLP, GCN, GraphSAGE, GAT, ConfidenceAwareGCN (+ ablation modes)
+  layers.py         ConfidenceWeightedConv, ConfidenceGCNConv, ConfidenceSAGEConv
+  models.py         MLP, GCN, GraphSAGE, GAT, ConfidenceAwareGCN, AdaptiveConfidenceGNN (AC-GCN/AC-SAGE/agreement)
   data.py           dataset loading, SBERT features, k-NN graphs, synthetic graph
-  train.py          training loop, CV splits, metrics, Wilcoxon + Holm
+  train.py          training loop (+ pseudo-label self-training), CV splits, metrics, Wilcoxon + Holm
 scripts/
   prepare_data.py   5 000-account subsample + SBERT embeddings
   run_synthetic.py  synthetic graph (RQ1) + Fig. 1
@@ -64,7 +71,7 @@ legacy/             original diploma prototype (synthetic graph, Leiden, Reddit 
 
 ```bash
 pip install -r requirements.txt
-./run_all.sh            # ~2 h on a 2-core CPU
+./run_all.sh            # ~5 h on a 2-core CPU
 ```
 
 or step by step:
@@ -74,7 +81,7 @@ python scripts/prepare_data.py                     # builds data/processed/twitt
 python -m pytest -q tests
 python scripts/run_synthetic.py
 python scripts/run_experiments.py --group select   # hyper-parameter selection (val only)
-python scripts/run_experiments.py --group main ablation density graph
+python scripts/run_experiments.py --group main ablation density graph v2 meta meta2 labels
 python scripts/diagnostics.py
 python scripts/analyze.py
 cd paper && latexmk -pdf main.tex
@@ -95,7 +102,9 @@ If Hugging Face is unreachable, point `SBERT_MODEL` at a local copy of
 * threshold-matched precision (baseline threshold tuned on validation to
   Conf-GCN's recall);
 * ablations: uniform, shuffled, inverted confidence; α ∈ {0.5, 2, 4};
-  self-loop; k ∈ {5, 10, 20}; description vs feature graph.
+  self-loop; k ∈ {5, 10, 20}; description / metadata / feature graph;
+* extensions: learnable α (AC-GCN, AC-SAGE), agreement weights, self-training;
+* label-scarce regime: 100 / 250 / 500 labels, 10 splits.
 
 ## Краткое описание (RU)
 

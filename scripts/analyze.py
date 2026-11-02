@@ -32,9 +32,9 @@ REF = "confgcn"
 summary = {}
 
 
-def get(variant):
+def get(variant, n=25):
     d = runs[runs.variant == variant].sort_values(["seed", "fold"])
-    assert len(d) == 25, (variant, len(d))
+    assert len(d) == n, (variant, len(d))
     return d
 
 
@@ -113,20 +113,36 @@ with open(f"{T}/table_density.tex", "w") as f:
 summary["graph"] = {}
 lines = []
 for model in ["gcn", "sage", "gat", "confgcn"]:
-    a_, b_ = get(model), get(f"{model}_featgraph")
+    a_, m_, b_ = get(model), get(f"{model}_metagraph"), get(f"{model}_featgraph")
     summary["graph"][model] = dict(
         desc={m: float(a_[f"test_{m}"].mean()) for m in METRICS},
+        meta={m: float(m_[f"test_{m}"].mean()) for m in METRICS},
         feat={m: float(b_[f"test_{m}"].mean()) for m in METRICS},
         p_f1=paired_wilcoxon(a_.test_f1.values, b_.test_f1.values),
-        p_f1_vs_mlp_feat=paired_wilcoxon(b_.test_f1.values, get("mlp").test_f1.values))
-    lines.append(f"{NAMES[model]} & {ms(a_.test_f1)} & {ms(a_.test_auroc)} & {ms(b_.test_f1)} & {ms(b_.test_auroc)} \\\\")
+        p_f1_meta_vs_desc=paired_wilcoxon(m_.test_f1.values, a_.test_f1.values),
+        p_f1_meta_vs_feat=paired_wilcoxon(m_.test_f1.values, b_.test_f1.values),
+        p_f1_vs_mlp_feat=paired_wilcoxon(b_.test_f1.values, get("mlp").test_f1.values),
+        p_f1_vs_mlp_meta=paired_wilcoxon(m_.test_f1.values, get("mlp").test_f1.values))
+    lines.append(f"{NAMES[model]} & {ms(a_.test_f1)} & {ms(a_.test_auroc)} & {ms(m_.test_f1)} & {ms(m_.test_auroc)} & {ms(b_.test_f1)} & {ms(b_.test_auroc)} \\\\")
 mlp_ = get("mlp")
-lines.append(f"\\midrule\n{NAMES['mlp']} & \\multicolumn{{4}}{{c}}{{F1 {ms(mlp_.test_f1)}, AUROC {ms(mlp_.test_auroc)}}} \\\\")
+lines.append(f"\\midrule\n{NAMES['mlp']} & \\multicolumn{{6}}{{c}}{{F1 {ms(mlp_.test_f1)}, AUROC {ms(mlp_.test_auroc)}}} \\\\")
 fc, fg = get("confgcn_featgraph"), get("gcn_featgraph")
 summary["graph"]["feat_conf_vs_gcn"] = {m: paired_wilcoxon(fc[f"test_{m}"].values, fg[f"test_{m}"].values)
                                         for m in METRICS}
 with open(f"{T}/table_graph.tex", "w") as f:
     f.write("\n".join(lines) + "\n")
+summary["meta_ext"] = {}
+for v, b in [("acgcn_metagraph", "gcn_metagraph"), ("acsage_metagraph", "sage_metagraph"),
+             ("sage_st_metagraph", "sage_metagraph"), ("confgcn_metagraph", "gcn_metagraph")]:
+    d, bb = get(v), get(b)
+    summary["meta_ext"][v] = {m: float(d[f"test_{m}"].mean()) for m in METRICS}
+    summary["meta_ext"][v]["p_f1_vs_base"] = paired_wilcoxon(d.test_f1.values, bb.test_f1.values)
+    summary["meta_ext"][v]["p_auroc_vs_base"] = paired_wilcoxon(d.test_auroc.values, bb.test_auroc.values)
+best = get("sage_metagraph")
+summary["best_system"] = dict(variant="sage_metagraph", **{m: dict(mean=float(best[f"test_{m}"].mean()),
+                              std=float(best[f"test_{m}"].std(ddof=1))) for m in METRICS},
+                              p_f1_vs_mlp=paired_wilcoxon(best.test_f1.values, mlp_.test_f1.values),
+                              p_f1_vs_gcn_desc=paired_wilcoxon(best.test_f1.values, get("gcn").test_f1.values))
 
 # ------------------------------------------------------------------ threshold-matched analysis
 def probs(variant):
@@ -163,6 +179,86 @@ for b in cmp:
 with open(f"{T}/table_threshold.tex", "w") as f:
     f.write("\n".join(lines) + "\n")
 
+
+# ------------------------------------------------------------------ extensions (future work), feature graph
+EXT = {"gcn": [("gcn_featgraph", "GCN"), ("acgcn_featgraph", "AC-GCN (learnable $\\alpha$)"),
+               ("cagree_featgraph", "Agreement-weighted GCN"), ("gcn_st_featgraph", "GCN + self-training"),
+               ("acgcn_st_featgraph", "AC-GCN + self-training")],
+       "sage": [("sage_featgraph", "GraphSAGE"), ("acsage_featgraph", "AC-SAGE (learnable $\\alpha$)"),
+                ("sage_st_featgraph", "GraphSAGE + self-training"),
+                ("acsage_st_featgraph", "AC-SAGE + self-training")]}
+summary["extensions"] = {}
+lines = []
+for fam, rows in EXT.items():
+    base = get(rows[0][0])
+    pf = holm({v: paired_wilcoxon(get(v).test_f1.values, base.test_f1.values) for v, _ in rows[1:]})
+    pa_ = holm({v: paired_wilcoxon(get(v).test_auroc.values, base.test_auroc.values) for v, _ in rows[1:]})
+    for v, name in rows:
+        d = get(v)
+        summary["extensions"][v] = {m: dict(mean=float(d[f"test_{m}"].mean()), std=float(d[f"test_{m}"].std(ddof=1)))
+                                    for m in METRICS}
+        summary["extensions"][v]["delta_f1_vs_base"] = float(d.test_f1.mean() - base.test_f1.mean())
+        summary["extensions"][v]["p_f1"] = pf.get(v)
+        summary["extensions"][v]["p_auroc"] = pa_.get(v)
+        al = [json.loads(x) for x in d.alpha_final if isinstance(x, str) and x != "null"]
+        if al:
+            summary["extensions"][v]["alpha_final_mean"] = [float(np.mean([a[i] for a in al])) for i in range(3)]
+        cells = [ms(d[f"test_{m}"]) for m in ["prec", "rec", "f1", "auroc"]]
+        lines.append(f"{name} & " + " & ".join(cells) + f" & {fmt_p(pf[v]) if v in pf else '---'} \\\\")
+    if fam == "gcn":
+        lines.append("\\midrule")
+with open(f"{T}/table_extensions.tex", "w") as f:
+    f.write("\n".join(lines) + "\n")
+summary["extensions_desc"] = {}
+for v in ["acgcn", "cagree"]:
+    d, b = get(v), get("gcn")
+    summary["extensions_desc"][v] = dict(f1=float(d.test_f1.mean()), auroc=float(d.test_auroc.mean()),
+                                         p_f1_vs_gcn=paired_wilcoxon(d.test_f1.values, b.test_f1.values))
+
+# ------------------------------------------------------------------ metadata-only graph
+summary["metagraph"] = {}
+for model in ["gcn", "sage"]:
+    d = get(f"{model}_metagraph")
+    summary["metagraph"][model] = {m: float(d[f"test_{m}"].mean()) for m in METRICS}
+    summary["metagraph"][model]["p_f1_vs_feat"] = paired_wilcoxon(d.test_f1.values, get(f"{model}_featgraph").test_f1.values)
+    summary["metagraph"][model]["p_f1_vs_mlp"] = paired_wilcoxon(d.test_f1.values, get("mlp").test_f1.values)
+
+# ------------------------------------------------------------------ label-scarce regime
+from scipy.stats import ttest_rel  # noqa: E402
+
+FRACS = [0.02, 0.05, 0.10]
+LAB = [("mlp", "MLP"), ("gcn", "GCN"), ("sage", "GraphSAGE"), ("acgcn", "AC-GCN"), ("acsage", "AC-SAGE"),
+       ("gcn_st", "GCN + ST"), ("sage_st", "GraphSAGE + ST")]
+summary["labels"] = {}
+lines = []
+for v, name in LAB:
+    row = [name]
+    for fr in FRACS:
+        d = get(f"{v}_lab{fr}", n=10)
+        mlp_d = get(f"mlp_lab{fr}", n=10)
+        p = paired_wilcoxon(d.test_f1.values, mlp_d.test_f1.values) if v != "mlp" else None
+        summary["labels"][f"{v}_{fr}"] = dict(f1=float(d.test_f1.mean()), f1_std=float(d.test_f1.std(ddof=1)),
+                                              auroc=float(d.test_auroc.mean()), p_f1_vs_mlp=p,
+                                              n_train=int(round(fr * 5000)))
+        row.append(ms(d.test_f1))
+    full = {"mlp": "mlp", "gcn": "gcn_featgraph", "sage": "sage_featgraph", "acgcn": "acgcn_featgraph",
+            "acsage": "acsage_featgraph", "gcn_st": "gcn_st_featgraph", "sage_st": "sage_st_featgraph"}[v]
+    row.append(ms(get(full).test_f1))
+    lines.append(" & ".join(row) + " \\\\")
+with open(f"{T}/table_labels.tex", "w") as f:
+    f.write("\n".join(lines) + "\n")
+
+fig, ax = plt.subplots(figsize=(3.5, 2.6))
+xs = [100, 250, 500, 3000]
+for v, name in [("mlp", "MLP"), ("gcn", "GCN"), ("sage", "GraphSAGE"), ("sage_st", "GraphSAGE + ST"), ("acsage", "AC-SAGE")]:
+    full = {"mlp": "mlp", "gcn": "gcn_featgraph", "sage": "sage_featgraph", "sage_st": "sage_st_featgraph",
+            "acsage": "acsage_featgraph"}[v]
+    ys = [get(f"{v}_lab{fr}", n=10).test_f1.mean() for fr in FRACS] + [get(full).test_f1.mean()]
+    ax.plot(xs, ys, marker="o", ms=3, lw=1.6 if v == "mlp" else 1.1, linestyle="--" if v == "mlp" else "-", label=name)
+ax.set_xscale("log"); ax.set_xticks(xs); ax.set_xticklabels([str(x) for x in xs])
+ax.set_xlabel("Labelled training accounts"); ax.set_ylabel("Test F1"); ax.grid(alpha=0.3)
+ax.legend(fontsize=6.5, frameon=False)
+plt.tight_layout(); plt.savefig(f"{F}/fig_labels.pdf"); plt.close()
 
 # ------------------------------------------------------------------ calibration (ECE)
 def ece(y, p, bins=10):

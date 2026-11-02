@@ -4,6 +4,7 @@ set -euo pipefail
 python scripts/prepare_data.py --data data/twitter_human_bots_clean.parquet
 python -m pytest -q tests
 python scripts/run_synthetic.py
-python scripts/run_experiments.py --group select main ablation density --threads 2
+python scripts/run_experiments.py --group select main ablation density graph v2 meta meta2 labels --threads 2
+python scripts/diagnostics.py
 python scripts/analyze.py
 (cd paper && latexmk -pdf -interaction=nonstopmode main.tex)

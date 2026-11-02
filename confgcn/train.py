@@ -12,7 +12,7 @@ from sklearn.metrics import (accuracy_score, average_precision_score, f1_score, 
                              recall_score, roc_auc_score)
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
-from .models import ConfidenceAwareGCN, build_model
+from .models import AdaptiveConfidenceGNN, ConfidenceAwareGCN, build_model
 
 
 def set_seed(seed: int):
@@ -52,38 +52,58 @@ class RunResult:
     p_test: np.ndarray
     loss: list = field(default_factory=list)
     mean_conf: list = field(default_factory=list)
+    alpha: list = field(default_factory=list)
     p_all: np.ndarray | None = None
 
 
 def train_run(model_name: str, x: torch.Tensor, edge_index: torch.Tensor, y: np.ndarray,
               tr: np.ndarray, va: np.ndarray, te: np.ndarray, seed: int, epochs: int = 100,
-              lr: float = 0.01, weight_decay: float = 5e-4, **model_kw) -> RunResult:
+              lr: float = 0.01, weight_decay: float = 5e-4, self_train: bool = False,
+              st_tau: float = 0.9, st_lambda: float = 0.5, st_warmup: int = 20,
+              **model_kw) -> RunResult:
+    """Train one model. With ``self_train`` the confident predictions (max
+    softmax >= st_tau) of the previous epoch on *unlabelled* nodes (all nodes
+    outside ``tr``; their true labels are never used) are added as
+    pseudo-labels with weight st_lambda after st_warmup epochs."""
     set_seed(seed)
     model = build_model(model_name, x.size(1), **model_kw)
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     yt = torch.as_tensor(y)
     tr_t = torch.as_tensor(tr)
     gen = torch.Generator().manual_seed(seed)
-    is_conf = isinstance(model, ConfidenceAwareGCN)
-    losses, confs = [], []
-    for _ in range(epochs):
+    is_conf = isinstance(model, (ConfidenceAwareGCN, AdaptiveConfidenceGNN))
+    losses, confs, alphas = [], [], []
+    unl = torch.ones(len(y), dtype=torch.bool)
+    unl[tr_t] = False
+    prev_prob = None
+    for epoch in range(epochs):
         model.train()
         opt.zero_grad()
         out = model(x, edge_index)
         loss = F.cross_entropy(out[tr_t], yt[tr_t])
+        if self_train and prev_prob is not None and epoch >= st_warmup:
+            conf_u, pseudo = prev_prob.max(dim=1)
+            m = unl & (conf_u >= st_tau)
+            if m.any():
+                loss = loss + st_lambda * F.cross_entropy(out[m], pseudo[m])
         loss.backward()
         opt.step()
         losses.append(float(loss))
-        if is_conf:
+        if is_conf or self_train:
             model.eval()
             with torch.no_grad():
-                raw = model.update_confidence(model(x, edge_index), generator=gen)
-            confs.append(float(raw.mean()))
+                logits = model(x, edge_index)
+            prev_prob = F.softmax(logits, dim=-1)
+            if is_conf:
+                raw = model.update_confidence(logits, generator=gen)
+                confs.append(float(raw.mean()))
+            if isinstance(model, AdaptiveConfidenceGNN):
+                alphas.append([round(float(a), 4) for a in model.alpha])
     model.eval()
     with torch.no_grad():
         p = F.softmax(model(x, edge_index), dim=-1)[:, 1].numpy()
     return RunResult(val=metrics(y[va], p[va]), test=metrics(y[te], p[te]),
-                     p_val=p[va], p_test=p[te], loss=losses, mean_conf=confs, p_all=p)
+                     p_val=p[va], p_test=p[te], loss=losses, mean_conf=confs, p_all=p, alpha=alphas)
 
 
 # --------------------------------------------------------------------------- #

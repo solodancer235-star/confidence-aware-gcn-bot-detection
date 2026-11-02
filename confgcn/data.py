@@ -91,6 +91,7 @@ def graph_space(emb: np.ndarray, numeric: np.ndarray, binary: np.ndarray, kind: 
     """Vectors on which the k-NN graph is built.
 
     ``desc``: description embeddings only (paper default).
+    ``meta``: z-scored metadata only.
     ``feat``: description embedding concatenated with z-scored metadata, the
     10-d metadata block scaled by 1/sqrt(10) so that both blocks have
     comparable norm. Standardisation is label-free (unsupervised graph
@@ -98,10 +99,12 @@ def graph_space(emb: np.ndarray, numeric: np.ndarray, binary: np.ndarray, kind: 
     """
     if kind == "desc":
         return emb
+    meta = np.concatenate([numeric, binary], axis=1).astype(np.float64)
+    meta = (meta - meta.mean(0)) / (meta.std(0) + 1e-8)
     if kind == "feat":
-        meta = np.concatenate([numeric, binary], axis=1).astype(np.float64)
-        meta = (meta - meta.mean(0)) / (meta.std(0) + 1e-8)
         return np.concatenate([emb, meta / np.sqrt(meta.shape[1])], axis=1).astype(np.float32)
+    if kind == "meta":
+        return meta.astype(np.float32)
     raise ValueError(kind)
 
 
