@@ -2,7 +2,7 @@
 
 Code, experiments and paper for **"Confidence-Aware Graph Neural Networks for Social
 Bot Detection: Message-Passing Reweighting and Similarity-Graph Construction"**
-(K. Kassymkhan, Astana IT University; La Lira L'vovna, L.N. Gumilyov Eurasian National University).
+(K. Kanalbay, Astana IT University; La Lira L'vovna, L.N. Gumilyov Eurasian National University).
 
 A Confidence-Aware GCN reweights every message `j → i` by the model's own
 confidence in neighbour `j` (max softmax probability from the previous epoch),

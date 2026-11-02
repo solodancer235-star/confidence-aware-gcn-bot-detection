@@ -141,7 +141,7 @@ for sh in s.shapes:
     elif sh.name == "Subtitle 2" and "Authors" in sh.text_frame.text:
         sh.width = Inches(9.2)
         ps = sh.text_frame.paragraphs
-        set_runs(ps[0], "Authors’ names: Kanalbay Kassymkhan, La Lira L'vovna")
+        set_runs(ps[0], "Authors’ names: Kassymkhan Kanalbay, La Lira L'vovna")
         r = ps[1].runs
         r[0].text = "University/company: Astana IT University; L.N. Gumilyov Eurasian National University"
         r[1].text = "City, Country: Astana, Kazakhstan"
@@ -461,7 +461,7 @@ header(s, "Thank You")
 tb(s, 0.5, 2.0, 9.0, 1.0, "Thank you for your attention!", size=40, bold=True, color=NAVY, align=PP_ALIGN.CENTER)
 tb(s, 0.5, 3.1, 9.0, 0.6, "Questions are welcome", size=22, color=BLUE, align=PP_ALIGN.CENTER)
 tb(s, 0.5, 4.2, 9.0, 1.5, [
-    "Kanalbay Kassymkhan — 255479@astanait.edu.kz",
+    "Kassymkhan Kanalbay — 255479@astanait.edu.kz",
     "La Lira L'vovna — Lira.La@astanait.edu.kz",
     "Code and results: github.com/solodancer235-star/confidence-aware-gcn-bot-detection",
 ], size=15, color=GRAY, align=PP_ALIGN.CENTER, space=4)
