@@ -12,3 +12,9 @@ paper/*.fdb_latexmk
 paper/*.fls
 paper/*.synctex.gz
 .venv/
+paper_csimq/*.aux
+paper_csimq/*.log
+paper_csimq/*.out
+paper_csimq/*.bbl
+paper_csimq/*.blg
+paper_csimq/*.synctex.gz

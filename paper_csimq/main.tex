@@ -1,0 +1,484 @@
+% !TEX TS-program = xelatex
+% !TEX encoding = UTF-8 Unicode
+% Compile with XeLaTeX:  xelatex main && bibtex main && xelatex main && xelatex main
+\documentclass{csimq}
+
+\usepackage[hidelinks]{hyperref}
+\setlength\parindent{13pt}
+\setcounter{page}{1}
+\renewcommand{\thefootnote}{\fnsymbol{footnote}}
+\setcounter{footnote}{1}
+
+% Tables (journal template settings)
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.25}
+\newcommand{\tablefont}{\fontsize{10}{12}\selectfont}
+
+\usepackage{fontspec}
+% The journal requires Times New Roman. If it is not installed (e.g. some Linux
+% systems), the metrically compatible TeX Gyre Termes is used instead.
+\IfFontExistsTF{Times New Roman}{\setmainfont{Times New Roman}}{\setmainfont{TeX Gyre Termes}}
+\renewcommand{\labelitemi}{$\bullet$}
+
+\usepackage[dvipsnames, x11names, svgnames]{xcolor}
+\usepackage[many]{tcolorbox}
+\definecolor{myorange}{HTML}{f79d53}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{adjustbox}
+
+% \tabinput reads a generated table body inside a tabular (plain \input breaks \bottomrule)
+\makeatletter\newcommand{\tabinput}[1]{\@@input #1 }\makeatother
+
+\begin{document}
+
+\title{Confidence-Aware Graph Neural Networks for Social Bot Detection: Message-Passing Reweighting and Similarity-Graph Construction}
+
+\author{Kanalbay Kassymkhan\inst{1}\protect\footnote[1]{Corresponding author\vspace{0.6em} \\%
+© 2026 Kanalbay Kassymkhan and Lira La. This is an open access article licensed under the Creative Commons Attribution License (http://creativecommons.org/licenses/by/4.0).\vspace{0.6em} \\%
+%
+Reference: K. Kassymkhan and L. La, “Confidence-Aware Graph Neural Networks for Social Bot Detection: Message-Passing Reweighting and Similarity-Graph Construction,” Complex Systems Informatics and Modeling Quarterly, CSIMQ, no. XX, pp. xx--xx, 2026. Available: https://doi.org/10.7250/csimq.2026-xx.xx \vspace{0.6em} \\%
+%
+Additional information. Author ORCID iD: K. Kassymkhan -- https://orcid.org/0000-0000-0000-0000, L. La -- https://orcid.org/0000-0000-0000-0000. PII S225599222600xxxX. Received: date/month/year. Accepted: date/month/year. Available online: date/month/year.}%
+\and Lira La\inst{2}}
+
+\institute{School of Software Engineering, Astana IT University, Mangilik El Ave. 55/11, Astana, 010000, Kazakhstan
+\and
+L.N. Gumilyov Eurasian National University, Satpayev St. 2, Astana, 010008, Kazakhstan
+}
+
+\maketitle
+\emails{solodancer235@gmail.com, Lira.La@astanait.edu.kz}
+
+\begin{abstractbox}
+
+\begin{abstract}
+Graph neural networks (GNNs) are increasingly used to detect social bots, but a standard Graph Convolutional Network (GCN) weights neighbor messages by node degree only. We study confidence-aware message passing, in which each neighbor is reweighted by the model's own predictive confidence, together with three extensions: an adaptive variant with a learnable exponent applied on top of the baseline normalization, agreement-based edge weights, and pseudo-label self-training. On a labeled Twitter dataset of 5\,000 accounts we compare these models with MLP, GCN, GraphSAGE and GAT baselines using repeated cross-validation, paired significance tests, ablations, and a study of how the similarity graph is built. Graph construction is the decisive design choice: on a $k$-nearest-neighbor graph of profile descriptions every GCN-type model is worse than a feature-only MLP, whereas on a graph of account metadata every GNN beats it. GraphSAGE on the metadata graph reaches an F1 score of 0.840 and an AUROC of 0.921, which is 3.2 F1 points above the MLP and 9.9 points above the original description-graph GCN. With only 250--500 labeled accounts, GraphSAGE with confidence-based self-training is the best model, about two F1 points above the MLP. Confidence reweighting itself is correct and inexpensive, and its adaptive form removes the accuracy loss of the original layer, but it does not outperform the baselines: the learned exponents shrink below one. Code and per-run results are publicly available.
+\end{abstract}
+
+\begin{keywords}
+Social Bot Detection, Graph Neural Networks, Message Passing, Confidence Weighting, Self-Training, Graph Construction
+\end{keywords}
+
+\end{abstractbox}
+
+\section{Introduction}
+
+Social media platforms increasingly contend with coordinated inauthentic accounts, commonly called social bots, that inflate follower counts, manufacture trending topics, and propagate disinformation at scale \cite{cresci2020decade}. Bots frequently operate in coordinated clusters and use templated, repetitive language, so both the relational structure of a social graph and the semantic content of posts carry complementary signal. This has motivated a shift from per-account classifiers toward Graph Neural Networks (GNNs), which propagate information along follow, mention, reply, or content-similarity edges and can therefore detect coordinated behavior invisible to a single-account feature vector.
+
+A standard GCN \cite{kipf2017gcn} aggregates each node's neighborhood with degree-normalized weights that are agnostic to how reliable a neighbor's representation currently is. In bot detection this is a potential weakness: when bots are deliberately disguised to resemble genuine users, a small number of cross-class edges connect bot clusters to the human subgraph, and an ambiguous account near the decision boundary then contributes to its neighbors' updates with the same weight as an account classified with near-certainty. Noisy, low-confidence signal can thus leak across the class boundary.
+
+This paper studies a Confidence-Aware GCN that addresses this weakness at the message-passing level. Each neighbor's contribution is scaled by the model's own confidence in that neighbor's class prediction from the previous epoch, renormalized so incoming weights sum to one. The mechanism requires no additional learnable parameters. In an earlier single-split experiment \cite{kassymkhan2026conf} the method raised precision by 3.0 points at a 7.6-point recall cost. Here we test whether that trade-off is a genuine effect of the confidence signal.
+
+\textbf{Research questions.} \textbf{RQ1}: does the mechanism behave correctly (convergence; equivalence to uniform aggregation when all confidences are equal)? \textbf{RQ2}: how does it change accuracy, precision, recall, F1, AUROC and AUC-PR relative to GCN, GraphSAGE, GAT and a feature-only model, and is the change statistically reliable? \textbf{RQ3}: is the effect attributable to the confidence signal itself, rather than to the change in normalization or to a shift of the decision threshold? \textbf{RQ4}: how much does the construction of the similarity graph matter compared with the aggregation rule? \textbf{RQ5}: do the extensions proposed as future work in our earlier study (learnable exponent, confidence on top of the baseline normalization, agreement weights, self-training) help? \textbf{RQ6}: what changes when only a few hundred accounts are labeled?
+
+\textbf{Contributions.} (1) A parameter-free confidence-weighted message-passing layer and an adaptive family (AC-GCN, AC-SAGE) that reduces exactly to GCN or GraphSAGE at $\alpha=0$ and learns how much confidence to use, all as PyTorch Geometric layers with unit tests of their formal properties. (2) A rigorous evaluation on a real Twitter dataset with repeated cross-validation, paired significance tests, a threshold-matched comparison and ablations that separate the confidence signal from its confounders. (3) A graph-construction study showing that a metadata $k$-NN graph turns GNNs from worse than an MLP into the best detectors; the resulting GraphSAGE detector improves F1 by 9.9 points over the original pipeline. (4) A label-scarce study in which confidence-based self-training on the improved graph gives the best detector. (5) An honest account of what does not work: confidence reweighting alone yields no significant gain, and we explain why. Code, configurations and per-run results are publicly available (see the Code and Data Availability section).
+
+\section{Related Work}
+
+This section reviews feature-based and graph-based bot detection, confidence-aware aggregation schemes, and the construction of similarity graphs for tabular data. Table~\ref{tab:positioning} positions the proposed method relative to the closest aggregation schemes.
+
+\begin{table}[htbp]
+\caption{Positioning relative to related aggregation schemes}
+\label{tab:positioning}
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Method & Weight source & Extra params & Uses pred.\ confidence\\
+\midrule
+GCN \cite{kipf2017gcn} & degree & no & no\\
+GAT \cite{velickovic2018gat} & learned attention & yes & no\\
+GraphSAGE \cite{hamilton2017sage} & mean/pool & yes & no\\
+ConfGCN \cite{vashishth2019confgcn} & learned label confidence & yes & indirectly\\
+Ours & softmax confidence & no & yes\\
+\bottomrule
+\end{tabular}\end{adjustbox}
+\end{table}
+
+\subsection{Feature-Based Bot Detection}
+Early detectors relied on hand-engineered behavioral and metadata features (posting frequency, account age, follower-to-friend ratios) combined with supervised classifiers; Botometer (formerly BotOrNot) blends a large number of such features in a supervised ensemble \cite{davis2016botornot}. Such approaches are effective against unsophisticated bots but degrade as bots adopt human-like patterns, and generalize poorly across datasets \cite{yang2020scalable,cresci2020decade}. Feature selection studies on Twitter bot detection show that profile and description features alone reach moderate accuracy \cite{lee2021discriminative}.
+
+\subsection{Graph-Based Bot Detection}
+Graph-based approaches exploit the observation that bots, even when individually convincing, tend to be structurally distinguishable: they cluster densely, share near-duplicate content, or connect to common amplification targets. GCNs \cite{kipf2017gcn} and inductive GraphSAGE-style models \cite{hamilton2017sage} have been applied to spam and bot detection \cite{alhosseini2019detect}. BotRGCN and the Relational Graph Transformer extend this to heterogeneous graphs with multiple relation types \cite{feng2021botrgcn,feng2022rgt}, evaluated on the TwiBot-20 benchmark \cite{feng2021twibot20}. Graph Attention Networks (GATs) learn per-edge attention weights instead of fixing them to degree-based normalization \cite{velickovic2018gat}. The benefit of message passing depends strongly on homophily, i.e.\ the fraction of edges joining same-class nodes \cite{zhu2020beyond}.
+
+\subsection{Confidence- and Uncertainty-Aware Aggregation}
+Several lines of work use model confidence. Pseudo-labeling and self-training use confident predictions on unlabeled data as additional supervision \cite{lee2013pseudo}. The closest graph-learning work is ConfGCN \cite{vashishth2019confgcn}, which estimates a per-node confidence over label distributions and uses it to modulate neighbor influence in semi-supervised node classification. Our approach differs in the signal and its cost: ConfGCN maintains a learned, per-node label-distribution estimate with additional parameters and a distribution-matching objective, whereas we derive confidence directly from the classifier's own softmax output, with no extra parameters, and study it specifically for bot detection. The reliability of softmax confidence itself is known to be imperfect and can be improved by calibration such as temperature scaling \cite{guo2017calibration}. Stochastic regularizers on message passing, such as DropEdge \cite{rong2020dropedge}, also aim to reduce the effect of noisy neighbors, but do so randomly and without regard to prediction reliability.
+
+\subsection{Similarity Graphs for Tabular Data}
+Sentence-BERT embeddings \cite{reimers2019sbert} enable similarity-based edges between accounts posting near-duplicate content even without explicit social links. For tabular bot datasets that provide rich per-account metadata but no follow graph, a $k$-nearest-neighbor graph over embeddings is a common substitute for explicit structure, a construction long used in graph-based semi-supervised learning \cite{zhu2003semi}.
+
+\section{Problem Formulation}
+
+Let $G=(V,E)$ be a social graph, where $V$ is the set of accounts and $E$ the set of follow, mention, reply, or content-similarity edges. Each node $v$ has a feature vector $x_v\in\mathbb{R}^d$ built from a Sentence-BERT embedding of the account text concatenated with normalized profile metadata. A label $y_v\in\{0,1\}$ (0 = human, 1 = bot) is known for a subset of nodes. The task is transductive semi-supervised node classification: learn $f: G\rightarrow\{0,1\}^{|V|}$ predicting the label of every node, including those withheld from training, by propagating information along $E$.
+
+\section{Methodology}
+
+This section introduces the baseline GCN, the Confidence-Aware GCN, its formal properties, and the adaptive extensions evaluated in this study.
+
+\subsection{Baseline GCN}
+The baseline stacks three \texttt{GCNConv} layers (PyTorch Geometric) mapping $d\rightarrow64\rightarrow64\rightarrow2$, with ReLU and dropout ($p=0.5$). Node $i$ is updated at layer $l$ as
+\begin{equation}
+h_i^{(l+1)}=\sigma\Big(\sum_{j\in\mathcal{N}(i)\cup\{i\}}\frac{1}{\sqrt{\hat d_i\hat d_j}}\,W^{(l)}h_j^{(l)}\Big),
+\label{eq:gcn}
+\end{equation}
+where $\hat d_i$ is the degree of $i$ including a self-loop. Training uses cross-entropy with Adam \cite{kingma2015adam}.
+
+\subsection{Confidence-Aware GCN}
+\label{sec:confgcn}
+The confidence of node $j$ is the maximum softmax probability of its logits $z_j$ from the previous epoch:
+\begin{equation}
+c_j=\max_k\ \mathrm{softmax}(z_j)_k .
+\label{eq:conf}
+\end{equation}
+For $C=2$ classes, $c_j\in[0.5,1]$. For every directed edge $j\rightarrow i$ the weight is renormalized over the incoming edges of $i$:
+\begin{equation}
+\tilde w_{j\rightarrow i}=\frac{c_j^{\alpha}}{\sum_{k\in\mathcal{N}(i)}c_k^{\alpha}},
+\label{eq:weight}
+\end{equation}
+with $\alpha=1$ in the proposed model, and the node update becomes
+\begin{equation}
+h_i^{(l+1)}=\sigma\Big(\sum_{j\in\mathcal{N}(i)}\tilde w_{j\rightarrow i}\,W^{(l)}h_j^{(l)}\Big).
+\label{eq:confupdate}
+\end{equation}
+Confidence is initialized to 1 for every node. At each epoch a forward pass produces logits for the loss and optimizer step; a second no-gradient forward pass in evaluation mode then recomputes the confidence vector for the next epoch. Confidence is stored as a plain tensor and updated inside a no-gradient context, so gradients never flow through it; this avoids a feedback loop between the loss and a quantity that depends on it. Confidence is computed from model outputs only and uses no labels, so evaluation nodes are not leaked.
+
+\begin{table}[htbp]
+\caption{Configuration of baseline and confidence-aware models}
+\label{tab:config}
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Component & Baseline & Conf.-Aware\\
+\midrule
+Conv.\ layer & \texttt{GCNConv} (PyG) & \texttt{ConfWeightedConv}$^{*}$\\
+Layers & 3 & 3\\
+Hidden dim. & 64 & 64\\
+Dropout & 0.5 & 0.5\\
+Learnable params (Twitter) & 29\,570 & 29\,570\\
+Optimizer & Adam (selected on val.) & Adam (selected on val.)\\
+\bottomrule
+\multicolumn{3}{@{}l}{\scriptsize $^{*}$Custom \texttt{MessagePassing} layer; mean-style normalization, no self-loop.}
+\end{tabular}\end{adjustbox}
+\end{table}
+
+\subsection{Properties and Limits of the Mechanism}
+\label{sec:props}
+\textbf{Reduction to uniform aggregation.} When $c_j=1$ for all $j$ (the first forward pass), Equation~\eqref{eq:confupdate} is mean aggregation over $\mathcal{N}(i)$. This is not identical to the symmetric degree normalization with self-loops used by the baseline (Equation~\ref{eq:gcn}). The two models therefore differ in normalization and self-loop handling in addition to the confidence signal; we address this explicitly with ablations (Section~\ref{sec:ablations}) rather than assuming the difference is attributable to confidence alone. The layer is also invariant to a global rescaling of the confidences, since only ratios enter Equation~\eqref{eq:weight}.
+
+\textbf{Bounded influence.} Because $c_j\in[0.5,1]$ in the binary case, the weights of any two neighbors of the same node differ by at most a factor of $2^{\alpha}$. With $\alpha=1$ the mechanism can therefore only moderately rebalance a neighborhood; we measure how much it actually does in Section~\ref{sec:diag}.
+
+\subsection{Architectural Parity}
+Both models use three layers, hidden dimension 64, dropout 0.5 and the same hyper-parameter search (Table~\ref{tab:config}); they have exactly the same number of learnable parameters (verified by a unit test). Parity of capacity does not imply that confidence is the only difference, so we complement it with the ablations below.
+
+\subsection{Adaptive Confidence-Aware GNNs}
+\label{sec:adaptive}
+The ablations in Section~\ref{sec:results-abl} show that Conf-GCN differs from GCN mainly through its normalization. We therefore propose an adaptive variant in which confidence only \emph{redistributes} the baseline's own weights. For AC-GCN, with $a_{j\rightarrow i}=1/\sqrt{\hat d_i\hat d_j}$ over $\mathcal{N}(i)\cup\{i\}$ as in Equation~\eqref{eq:gcn},
+\begin{equation}
+w^{(l)}_{j\rightarrow i}=a_{j\rightarrow i}\,c_j^{\alpha_l}\;\frac{\sum_{k}a_{k\rightarrow i}}{\sum_{k}a_{k\rightarrow i}\,c_k^{\alpha_l}},
+\label{eq:acgcn}
+\end{equation}
+which keeps the row mass of GCN; with constant confidence or $\alpha_l=0$ the layer is \emph{exactly} \texttt{GCNConv}, so any difference from GCN is due to confidence alone. The exponent $\alpha_l=\mathrm{softplus}(\rho_l)\ge0$ is learned per layer (three scalars, initialized at $\alpha=1$); large $\alpha$ removes the factor-2 bound on neighbor influence. AC-SAGE applies the same idea to GraphSAGE: $h_i'=W_r h_i+W_n\sum_{j\in\mathcal{N}(i)}\tilde w_{j\rightarrow i}h_j$ with $\tilde w$ from Equation~\eqref{eq:weight} and learnable $\alpha_l$; at $\alpha=0$ it equals mean-aggregation GraphSAGE.
+
+\textbf{Agreement weights.} Node confidence ignores \emph{whether} the two endpoints of an edge agree. We therefore also test edge factors $f_{j\rightarrow i}=(\sum_k p_{jk}p_{ik})^{\alpha_l}$, the probability under the previous epoch's predictions that $i$ and $j$ share a class, inserted in Equation~\eqref{eq:acgcn} instead of $c_j^{\alpha_l}$. Confidently disagreeing endpoints receive a weight close to zero, so the edge is effectively pruned.
+
+\textbf{Self-training.} Confidence can also be used as supervision \cite{lee2013pseudo,li2018deeper}. After 20 warm-up epochs, every node outside the training set whose previous-epoch confidence is at least $\tau=0.9$ receives its predicted class as a pseudo-label, added to the loss with weight $\lambda=0.5$. True labels of these nodes are never used. Self-training is applied to GCN, GraphSAGE, AC-GCN and AC-SAGE (``+ST'').
+
+\section{Implementation}
+
+The system is implemented in Python with PyTorch and PyTorch Geometric \cite{fey2019pyg}, sentence-transformers (\texttt{all-MiniLM-L6-v2}, 384-dimensional output) \cite{reimers2019sbert}, NetworkX for graph construction, scikit-learn for $k$-NN graphs, scaling and metrics, and SciPy for statistical tests.
+
+\texttt{ConfidenceWeightedConv} extends \texttt{MessagePassing} with additive aggregation. Its \texttt{forward} method takes a per-node source-weight vector as an argument, computes per-edge weights as the source node's weight divided by the sum of weights over the target node's incoming edges (scatter-add indexed by target), and its \texttt{message} method multiplies each transformed source representation by this weight. \texttt{ConfidenceAwareGCN} stacks three such layers, stores confidence as a plain module attribute (not a registered parameter), lazily initializes it to ones on the first forward call, and exposes a no-gradient \texttt{update\_confidence} method that recomputes it as the row-wise maximum softmax probability of the latest logits. \texttt{ConfidenceGCNConv} and \texttt{ConfidenceSAGEConv} implement Equation~\eqref{eq:acgcn} and AC-SAGE; their source weights are not detached, so the exponents receive gradients. A \texttt{mode} switch implements the ablation controls (uniform, shuffled and inverted confidence) and a \texttt{self\_loop} flag adds self-loops inside the confidence-weighted layer. Unit tests check that incoming weights sum to one, that $c\equiv1$ reproduces mean aggregation exactly, scale invariance, parameter parity with \texttt{GCNConv}, that confidence carries no gradient, that \texttt{ConfidenceGCNConv} equals \texttt{GCNConv} for constant confidence and preserves row mass, and that the exponents receive finite gradients.
+
+\section{Experimental Setup}
+
+This section describes the synthetic and real-world data, the compared models, the evaluation protocol, and the ablations.
+
+\subsection{Synthetic Social Graph}
+To verify correctness under controlled conditions we generate a graph of 500 nodes: 400 humans connected by a Barab\'asi--Albert preferential-attachment model ($m=3$), and 100 bots in two dense, fully connected clusters of 50, plus 20 random bot--human edges simulating disguised bots (3\,661 structural edges). Human text is drawn from 15 topical templates, bot text from 10 near-duplicate cryptocurrency-spam templates with minor lexical variation. Each node's 384-dimensional embedding is its feature vector, and edges are added between node pairs whose cosine similarity exceeds 0.85 (6\,663 new undirected edges, 10\,324 in total).
+
+\subsection{Real-World Twitter Dataset}
+We use the publicly available Twitter human/bot dataset \cite{gutierrez2021twitter} (37\,438 accounts, 25\,013 humans, 12\,425 bots), with labels obtained through the Botometer API combined with manual verification and 20 metadata columns. We work with a cleaned public redistribution of it \cite{botani2024} that keeps the 29\,407 accounts whose interface language is English or unset (19\,676 humans, 9\,731 bots; class ratio 2.02:1 vs.\ 2.01:1 in the original) and strips URLs, @-mentions, e-mail addresses and emoji from the descriptions. Because labels partly derive from a feature-based detector, label noise correlated with metadata features is possible (Section~\ref{sec:threats}).
+
+For computational reasons on CPU, we draw a stratified subsample of 5\,000 accounts (2\,500 humans, 2\,500 bots; fixed seed); 1\,516 of them (30\%) have an empty description. Node features are 394-dimensional: a 384-d embedding of the profile description, six numeric fields (status, follower, friend and favorite counts, account age in days, average tweets per day) log-transformed and standardized with training-node statistics of each fold, and four binary fields (default profile, default profile image, verified, geo-enabled).
+
+\textbf{Graph construction.} As the dataset has no explicit follow graph, we build three label-free, symmetrized cosine $k$-NN graphs ($k=10$) \cite{zhu2003semi}: the \emph{description graph} over description embeddings (default of our earlier study; 84\,462 directed edges, edge homophily 0.617); the \emph{metadata graph} over the ten z-scored metadata fields (66\,440 edges, homophily 0.777); and the \emph{feature graph} over the description embedding concatenated with the metadata block scaled by $1/\sqrt{10}$ so that both blocks have comparable norm (77\,696 edges, homophily 0.756).
+
+\subsection{Compared Models}
+All GNNs use three layers, hidden dimension 64 and dropout 0.5:
+\begin{itemize}
+\item \textbf{MLP}: same features, no graph (isolates the value of structure).
+\item \textbf{GCN} \cite{kipf2017gcn}: baseline.
+\item \textbf{GraphSAGE} \cite{hamilton2017sage}: mean aggregator with a separate root (self) transformation.
+\item \textbf{GAT} \cite{velickovic2018gat}: learned attention; total hidden width 64 split over $h$ heads.
+\item \textbf{Conf-GCN} (ours, Section~\ref{sec:confgcn}).
+\item \textbf{AC-GCN, AC-SAGE, agreement-weighted GCN} and \textbf{+ST} variants (ours, Section~\ref{sec:adaptive}); they reuse the hyper-parameters selected for GCN or GraphSAGE.
+\end{itemize}
+
+\subsection{Evaluation Protocol}
+\label{sec:protocol}
+\textbf{Splits and repetition.} Each model is evaluated with stratified 5-fold cross-validation repeated over 5 random seeds (25 runs per model), with the training portion of each fold further split to obtain a validation set (60/20/20 overall). All models see identical splits.
+
+\textbf{Hyper-parameter selection.} Learning rate $\in\{0.01,0.005\}$, weight decay $\in\{5\times10^{-4},5\times10^{-5}\}$ and, for GAT, the number of heads $\in\{1,4,8\}$ are selected by mean validation F1 over the five folds of seed~0 only; the test folds are never used. Selected: MLP, GraphSAGE and GAT ($h=1$) $\mathrm{lr}=0.005$, $\mathrm{wd}=5\times10^{-4}$; GCN and Conf-GCN $\mathrm{lr}=0.01$, $\mathrm{wd}=5\times10^{-5}$. All ablations reuse the Conf-GCN setting. The epoch count is fixed at 100 for all models, without early stopping.
+
+\textbf{Metrics.} Accuracy, precision, recall and F1 for the bot class at the default threshold 0.5, plus the threshold-independent AUROC and AUC-PR (average precision), and the expected calibration error (ECE, 10 bins).
+
+\textbf{Statistical testing.} We report mean $\pm$ standard deviation over the 25 runs and compare Conf-GCN against each baseline with a paired two-sided Wilcoxon signed-rank test over matched runs, with Holm correction across the comparisons of a table \cite{demsar2006statistical,holm1979simple}. Because the runs share data across folds and seeds, $p$-values are treated as indicative rather than exact.
+
+\textbf{Label-scarce regime.} To mimic moderation settings with few verified labels, we fix 20\% test and 20\% validation nodes and train on a stratified set of only 100, 250 or 500 labeled accounts (2, 5, 10\% of the graph), repeated over 10 random splits, on the feature graph.
+
+\textbf{Threshold-matched analysis.} A precision gain with a recall loss could simply reflect a different operating point on the same ranking. For every run we therefore (i) take the validation recall of Conf-GCN at threshold 0.5 as a target, (ii) choose each baseline's threshold on \emph{its validation set} as the largest threshold reaching that recall, and (iii) compare test precision at these thresholds. We also report full precision--recall curves.
+
+\subsection{Ablations}
+\label{sec:ablations}
+To attribute the effect to the confidence signal itself, we run, with all other settings fixed:
+\begin{enumerate}
+\item \textbf{Uniform-confidence control}: same layer with $c_j\equiv1$ (mean aggregation, no self-loop). This separates the effect of confidence from the change in normalization.
+\item \textbf{Shuffled confidence}: confidences randomly permuted across nodes each epoch (same marginal distribution, no node-specific information).
+\item \textbf{Inverted weighting}: weights proportional to $1-c_j+0.5$, favoring low-confidence neighbors.
+\item \textbf{Exponent $\alpha$}: $\alpha\in\{0.5,2,4\}$ ($\alpha=0$ is the uniform control, $\alpha=1$ the full model).
+\item \textbf{Self-loop}: self-loops added to the confidence-weighted layer, with real and with uniform confidence.
+\item \textbf{Graph density}: $k\in\{5,10,20\}$ in the $k$-NN graph, for GCN and Conf-GCN.
+\item \textbf{Graph construction}: description, metadata and feature graphs for all GNNs.
+\end{enumerate}
+
+\section{Results}
+
+The results are reported in the order of the research questions: correctness on the synthetic graph, the cross-validated comparison on real data, the ablations, the effect of graph construction, the extensions, and the label-scarce regime.
+
+\subsection{Synthetic Graph (RQ1)}
+
+\begin{table}[htbp]
+\caption{Synthetic graph, single stratified 60/20/20 split}
+\label{tab:synthetic}
+\centering
+\tablefont
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Metric & Baseline & Conf.-Aware & $\Delta$\\
+\midrule
+Accuracy & 1.0000 & 1.0000 & 0.0000\\
+Precision & 1.0000 & 1.0000 & 0.0000\\
+Recall & 1.0000 & 1.0000 & 0.0000\\
+F1-score & 1.0000 & 1.0000 & 0.0000\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.62\textwidth]{figures/fig1_synthetic_graph.png}
+\caption{Synthetic graph (500 nodes, 10\,324 edges) colored by the Conf-GCN prediction: correctly classified humans (green) form a loose preferential-attachment community; correctly classified bots (red) form two dense, well-separated clusters. No node is misclassified.}
+\label{fig:synthetic}
+\end{figure}
+
+Both models reach the task ceiling: accuracy, precision, recall and F1 are all 1.0000 for the baseline and the confidence-aware model (Table~\ref{tab:synthetic}, Figure~\ref{fig:synthetic}); the same holds for MLP, GraphSAGE and GAT and for all 25 cross-validation runs of every model (125 runs, every metric 1.000). This is expected from the data-generating process: the bot clusters are fully connected subgraphs whose members share near-identical embeddings, producing a dense web of semantic edges within each cluster and almost none to the human subgraph, so the classes are separable by structure and by features alone. The task therefore verifies correctness (RQ1) but cannot discriminate between the models. Training loss falls to below $10^{-3}$ ($9.8\times10^{-4}$ for GCN, $6.5\times10^{-4}$ for Conf-GCN) for both models, and the mean confidence of the confidence-aware model rises from 0.998 at epoch 20 to 0.999 at epoch 100 (Figure~\ref{fig:conf}), showing that the mechanism converges as intended. The unit tests confirm the formal properties of Section~\ref{sec:props}, in particular exact equivalence to mean aggregation when $c\equiv1$.
+
+\subsection{Preliminary Single-Split Result}
+
+\begin{table}[htbp]
+\caption{Real Twitter data, single split, as reported in our earlier study \cite{kassymkhan2026conf}}
+\label{tab:prelim}
+\centering
+\tablefont
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Metric & Baseline & Conf.-Aware & $\Delta$\\
+\midrule
+Accuracy & 0.7150 & 0.7130 & $-$0.0020\\
+Precision & 0.7002 & 0.7300 & $+$0.0298\\
+Recall & 0.7520 & 0.6760 & $-$0.0760\\
+F1-score & 0.7252 & 0.7020 & $-$0.0232\\
+\bottomrule
+\end{tabular}\end{adjustbox}
+\end{table}
+
+Table~\ref{tab:prelim} reproduces the original single train/test split on a 5\,000-account subsample of the full 37\,438-account release \cite{kassymkhan2026conf}. The confidence-aware model improved precision by 2.98 points while recall fell by 7.60 points and F1 by 2.32 points; accuracy was essentially unchanged. On a single split, differences of this size cannot be separated from sampling noise, which is why the protocol of Section~\ref{sec:protocol} was added. Absolute numbers below are not directly comparable with Table~\ref{tab:prelim} because the English-only redistribution yields a different subsample.
+
+\subsection{Extended Comparison (RQ2)}
+
+\begin{table}[htbp]
+\caption{Real Twitter data (description $k$-NN graph, $k=10$), 5-fold CV $\times$ 5 seeds (mean $\pm$ std over 25 runs). $p$: paired Wilcoxon vs.\ Conf-GCN, Holm-corrected over the four baselines.}
+\label{tab:main}
+\centering
+\tablefont
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{@{}lcccccccc@{}}
+\toprule
+Model & Acc. & Prec. & Rec. & F1 & AUROC & AUC-PR & $p$ (F1) & $p$ (Prec.)\\
+\midrule
+\tabinput{tables/table_main.tex}
+\bottomrule
+\end{tabular}\end{adjustbox}
+\end{table}
+
+Table~\ref{tab:main} shows the cross-validated comparison. Three findings stand out. First, the precision gain of Table~\ref{tab:prelim} does not replicate: Conf-GCN and GCN have the same mean precision (0.732 vs.\ 0.731, $p=0.83$). The recall loss does replicate in direction ($-2.0$ points), so Conf-GCN has a lower F1 than GCN (0.731 vs.\ 0.740, $p=0.004$) and is statistically indistinguishable from GAT in F1. Second, the threshold-independent metrics are clearly worse for Conf-GCN: AUROC 0.794 vs.\ 0.819 for GCN and GAT, AUC-PR 0.772 vs.\ 0.824, i.e.\ its ranking of accounts is worse, not merely shifted. Third, and most importantly for interpreting any GNN result on this benchmark, the feature-only MLP is the best model (F1 0.807, AUROC 0.890), tied with GraphSAGE (F1 0.803), whose separate root transformation lets it fall back on a node's own features. Models that mix a node's representation with its description neighbors (GCN, GAT, Conf-GCN) lose 6.7--7.6 F1 points relative to ignoring the graph. The run-to-run standard deviation of F1 (0.016--0.019 for GCN-type models) is of the same order as the single-split differences in Table~\ref{tab:prelim}, which explains why a single split was misleading.
+
+\subsection{Ablations (RQ3)}
+\label{sec:results-abl}
+
+\begin{table}[htbp]
+\caption{Ablations, description graph (mean $\pm$ std over 25 runs). $p$: paired Wilcoxon of F1 vs.\ full Conf-GCN, Holm-corrected over the nine comparisons.}
+\label{tab:ablation}
+\centering
+\tablefont
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Variant & Prec. & Rec. & F1 & AUROC & $p$ (F1)\\
+\midrule
+\tabinput{tables/table_ablation.tex}
+\bottomrule
+\end{tabular}\end{adjustbox}
+\end{table}
+
+Table~\ref{tab:ablation} isolates the confidence signal. The uniform-confidence control, which keeps the layer but discards confidence, is \emph{at least as good} as the full model (F1 0.736 vs.\ 0.731, AUROC 0.795 vs.\ 0.794). Shuffled confidence, which preserves the marginal distribution but destroys node identity, and inverted weighting, which favors the \emph{least} confident neighbors, both land within 0.5 F1 points of the full model and are not significantly different from it. Sharpening the weights does not help either: $\alpha=2$ and $\alpha=4$ slightly lower F1 (0.728, 0.727) and AUROC (0.793, 0.788). The behavior of Conf-GCN is therefore explained by its normalization, not by confidence.
+
+The self-loop variants identify which part of the normalization matters. Adding a self-loop to the uniform layer recovers GCN-level performance (F1 0.742, AUROC 0.817 vs.\ GCN 0.740, 0.819); adding it to the confidence-weighted layer recovers the AUROC (0.815) but not the F1 (0.734). The 2.5-point AUROC gap between Conf-GCN and GCN in Table~\ref{tab:main} is thus almost entirely due to the missing self-loop, i.e.\ to the node's own features being diluted by its neighbors. We answer RQ3 negatively: on this benchmark the confidence signal itself has no measurable benefit, and the precision-oriented behavior suggested by the single split is not a property of the method.
+
+\subsection{Threshold-Matched Precision}
+
+\begin{table}[htbp]
+\caption{Test precision of each baseline at a threshold tuned on its validation set to Conf-GCN's validation recall (mean $\pm$ std over 25 runs). $\Delta$ = Conf-GCN $-$ baseline; $p$: paired Wilcoxon, Holm-corrected.}
+\label{tab:threshold}
+\centering
+\tablefont
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Baseline & Rec.\ (base) & Prec.\ (base) & Prec.\ (Conf) & $\Delta$ & $p$\\
+\midrule
+\tabinput{tables/table_threshold.tex}
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.6\textwidth]{figures/fig_pr_curves.pdf}
+\caption{Precision--recall curves on the test folds (precision interpolated on a common recall grid and averaged over the 25 runs). Description graph, $k=10$.}
+\label{fig:pr}
+\end{figure}
+
+Table~\ref{tab:threshold} asks whether a practitioner who wants Conf-GCN's operating point could obtain it more cheaply by moving the threshold of a baseline. At matched recall (0.730--0.733 for all models) GCN is 0.9 points and GAT 1.2 points \emph{more} precise than Conf-GCN, and MLP and GraphSAGE are about 12 points more precise; all differences are consistent across runs ($p<0.001$). The precision--recall curves (Figure~\ref{fig:pr}) show the same picture at every operating point: the Conf-GCN curve lies below GCN and GAT, which lie well below MLP and GraphSAGE. Any precision-oriented operating point is therefore better obtained by raising the threshold of a baseline.
+
+\subsection{Graph Construction and Density (RQ4)}
+
+\begin{table}[htbp]
+\caption{Effect of graph construction ($k=10$, mean $\pm$ std over 25 runs). Edge homophily: description graph 0.617, metadata graph 0.777, feature graph 0.756.}
+\label{tab:graph}
+\centering
+\tablefont
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+& \multicolumn{2}{c}{Description graph} & \multicolumn{2}{c}{Metadata graph} & \multicolumn{2}{c}{Feature graph}\\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Model & F1 & AUROC & F1 & AUROC & F1 & AUROC\\
+\midrule
+\tabinput{tables/table_graph.tex}
+\bottomrule
+\end{tabular}\end{adjustbox}
+\end{table}
+
+The description graph is a weak structure: only 61.7\% of its edges join accounts of the same class (50\% would be random for a balanced sample), and the 30\% of accounts with an empty description share an identical embedding, so their neighborhoods are essentially arbitrary among themselves. Table~\ref{tab:graph} shows that changing \emph{only} the graph reverses the conclusion about GNNs. On the metadata graph (homophily 77.7\%) every GNN beats the feature-only MLP: GraphSAGE reaches F1 0.840 and AUROC 0.921, GCN 0.826, Conf-GCN 0.824 and GAT 0.823, against 0.807 for the MLP (all $p<2\times10^{-5}$). The feature graph, which mixes descriptions and metadata, is also clearly better than the description graph (every GNN gains 2--9 F1 points, $p<10^{-6}$) but slightly worse than the metadata graph (GraphSAGE 0.825 vs.\ 0.840, $p<10^{-6}$). GraphSAGE on the metadata graph is the best detector in this study: compared with the original pipeline of our earlier work (GCN on the description graph, F1 0.740) it gains 9.9 F1 points and 10.2 AUROC points, and it beats the MLP by 3.2 F1 points ($p<10^{-6}$). Its separate root transformation lets it combine a node's own features with a neighborhood of similar accounts without diluting them, which is also why it was the only GNN that matched the MLP on the poor description graph.
+
+Graph density matters much less than graph construction. On the description graph, GCN reaches F1 0.732/0.740/0.734 for $k=5/10/20$ and Conf-GCN 0.729/0.731/0.726; GCN is ahead of Conf-GCN at every $k$ (unadjusted $p=0.15$, 0.002, $<0.001$).
+
+\subsection{Confidence-Aware Extensions (RQ5)}
+
+\begin{table}[htbp]
+\caption{Confidence-aware extensions on the feature graph (mean $\pm$ std over 25 runs). $p$: paired Wilcoxon of F1 vs.\ the base model of each block, Holm-corrected within the block.}
+\label{tab:ext}
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Model & Prec. & Rec. & F1 & AUROC & $p$ (F1)\\
+\midrule
+\tabinput{tables/table_extensions.tex}
+\bottomrule
+\end{tabular}\end{adjustbox}
+\end{table}
+
+Table~\ref{tab:ext} evaluates the extensions of Section~\ref{sec:adaptive} on the feature graph. All of them stay within 0.5 F1 points of their base model; none is significantly better, and AC-SAGE with self-training is slightly but significantly worse than GraphSAGE ($-0.5$ F1, $p=0.018$). The adaptive design nonetheless fixes the main weakness of the original layer: on the description graph AC-GCN reaches F1 0.737 and AUROC 0.819 (GCN 0.740/0.819; Conf-GCN 0.731/0.794), i.e.\ the 2.5-point AUROC deficit of Conf-GCN disappears once confidence is applied on top of GCN's normalization instead of replacing it. The agreement-weighted GCN behaves the same (description graph F1 0.739, feature graph 0.818). On the metadata graph AC-GCN and AC-SAGE reach F1 0.825 and 0.835 (GCN 0.826, GraphSAGE 0.840), small but consistent losses (unadjusted $p=0.042$ and $0.004$).
+
+The learned exponents explain this outcome. Starting from $\alpha=1$, AC-GCN ends at $\alpha\approx(0.69, 0.69, 0.61)$ for its three layers and AC-SAGE at $(0.78, 0.77, 0.76)$: given the freedom to amplify confidence, the models \emph{reduce} it, i.e.\ they move towards their baselines. Self-training is neutral when 60\% of the nodes are labeled (feature graph: GCN 0.818 vs.\ 0.820, GraphSAGE 0.824 vs.\ 0.825; metadata graph: GraphSAGE 0.839 vs.\ 0.840), because the supervised signal is already abundant.
+
+\subsection{Label-Scarce Regime (RQ6)}
+
+\begin{table}[htbp]
+\caption{Test F1 with few labeled accounts (feature graph; mean $\pm$ std over 10 splits; 3\,000 labels = the 25-run CV setting).}
+\label{tab:labels}
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Model & 100 labels & 250 labels & 500 labels & 3\,000 labels\\
+\midrule
+\tabinput{tables/table_labels.tex}
+\bottomrule
+\end{tabular}\end{adjustbox}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.6\textwidth]{figures/fig_labels.pdf}
+\caption{Test F1 as a function of the number of labeled training accounts (feature graph).}
+\label{fig:labels}
+\end{figure}
+
+Labels are expensive in moderation, so Table~\ref{tab:labels} and Figure~\ref{fig:labels} repeat the comparison with 100, 250 and 500 labeled accounts. GraphSAGE with confidence-based self-training is the best model at every budget from 100 to 500 labels: F1 0.764, 0.781 and 0.795 vs.\ 0.744, 0.761 and 0.773 for the MLP, a gain of 2.0--2.2 F1 points ($p=0.002$ at 250 and at 500 labels, $p=0.06$ at 100 labels; with 10 splits the smallest attainable two-sided Wilcoxon $p$ is 0.002). Self-training adds to GraphSAGE where labels are scarce (+0.6 F1 at 250 labels, $p=0.014$) and GCN also benefits (0.762 $\rightarrow$ 0.771 at 250 labels). Here confidence is useful, but as a filter for pseudo-labels rather than as a weight inside message passing: AC-SAGE is never significantly better than GraphSAGE ($p\ge0.13$). The graph matters most when labels are few, because neighbors propagate information from labeled to unlabeled accounts.
+
+\subsection{Why the Confidence Signal Has No Effect}
+\label{sec:diag}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_confidence.pdf}
+\caption{Left: mean confidence of Conf-GCN over training (real data: mean and min--max range over 25 runs; synthetic: single run). Right: mean training loss of GCN and Conf-GCN on the real data.}
+\label{fig:conf}
+\end{figure}
+
+We trained Conf-GCN on the five folds of seed~0 and inspected the final confidence vector and the resulting edge weights. Averaged over the 25 main runs, the mean confidence on the real data rises only from 0.586 after the first epoch to 0.749 at epoch 100 (Figure~\ref{fig:conf}), in contrast to the synthetic graph where it saturates near 0.999; the 10th and 90th percentiles of the final confidences are 0.572 and 0.903. Inside a neighborhood the largest weight is a median 1.45$\times$ the smallest (95th percentile 1.82$\times$), and the weights deviate from uniform $1/\deg(i)$ by only 6.5\% on average. The bounded-influence property of Section~\ref{sec:props} therefore binds in practice: the layer is very close to mean aggregation, which is why the uniform control reproduces it. The confidence signal is also only moderately informative: as a score for whether a test node is classified correctly it reaches an AUROC of only 0.66 (0.77 on the feature graph, where the weights still deviate from uniform by just 7.1\%), and the softmax outputs of Conf-GCN are not better calibrated than those of the baselines (ECE 0.041 vs.\ 0.034 for GCN and 0.033 for MLP). Sharpening the weights with $\alpha>1$ amplifies this partly wrong signal and lowers AUROC (Table~\ref{tab:ablation}). The cost of the mechanism is a second forward pass per epoch; on a shared two-core CPU a Conf-GCN run (100 epochs) took 16.9\,s on average vs.\ 14.3\,s for GCN.
+
+\section{Discussion}
+
+This section summarizes the answers to the research questions, discusses their practical significance and limitations, and lists threats to validity.
+
+\subsection{Answers to the Research Questions}
+\textbf{RQ1:} the layers are correct: Conf-GCN converges on the synthetic graph and reduces exactly to mean aggregation for equal confidences; AC-GCN and AC-SAGE reduce exactly to GCN and GraphSAGE. \textbf{RQ2:} on the description graph Conf-GCN does not improve any metric over GCN, and all GCN-type models are beaten by an MLP. \textbf{RQ3:} the differences between Conf-GCN and GCN are explained by its normalization, not by confidence; a threshold-tuned GCN dominates it at matched recall. \textbf{RQ4:} graph construction dominates the aggregation rule; a metadata $k$-NN graph makes every GNN better than the MLP, and GraphSAGE on it is the best detector (F1 0.840, AUROC 0.921). \textbf{RQ5:} applying confidence on top of the baseline normalization removes Conf-GCN's AUROC loss, but neither learnable exponents nor agreement weights give a significant gain, and the learned exponents shrink below one. \textbf{RQ6:} with few labels, confidence is useful as a pseudo-label filter: GraphSAGE with self-training is the best model at 100--500 labels.
+
+\subsection{Practical Significance}
+In moderation pipelines false positives are often more costly than false negatives, so a precision-oriented detector is attractive. Our threshold-matched analysis shows that Conf-GCN does not provide such an operating point more cheaply than a baseline, so we withdraw the ``implicit regularizer'' interpretation proposed in our earlier study. The practically useful outcome is different: building the similarity graph from account metadata and using an aggregator with a root connection raises precision \emph{and} recall at the same time (GraphSAGE on the metadata graph: precision 0.842, recall 0.838 vs.\ 0.731/0.752 for the original GCN pipeline), at no extra labeling cost, and confidence-based self-training adds a further gain when only a few hundred accounts are labeled. Both changes are simple to deploy in an existing GNN pipeline.
+
+\subsection{Why Reweighting Is Weak Here}
+In the binary case $c_j\in[0.5,1]$, so with $\alpha=1$ two neighbors differ in weight by at most a factor of two, and on real data the weights deviate from uniform by only 6.5\%. Larger exponents could break this bound, but the confidence of a neighbor is only moderately predictive of whether it is correct (AUROC 0.66--0.77), so amplifying it also amplifies errors; the learned exponents therefore decrease. Graph construction changes which accounts are neighbors at all, which is a much stronger intervention than rescaling their messages by at most a factor of two.
+
+\subsection{Absolute Accuracy}
+The best model reaches about 84\% accuracy on balanced data using profile metadata and description text only, without tweet history or an explicit follow graph. Reported accuracy for comparable feature sets varies widely across datasets and protocols \cite{yang2020scalable,lee2021discriminative}, so we rely on the in-paper comparisons.
+
+\subsection{Threats to Validity}
+\label{sec:threats}
+\textbf{Graph construction:} the $k$-NN graphs are derived from the same embeddings and metadata used as features, so edges encode similarity already present in the features; real follow or mention graphs may behave differently. \textbf{Labels:} partly derived from Botometer, which is itself a metadata-based detector; this may favor the metadata graph and metadata features. \textbf{Data:} we used an English-only cleaned redistribution and a 5\,000-account subsample; the code also accepts the original release. \textbf{Statistics:} runs share data across folds and seeds, so Wilcoxon $p$-values are indicative. \textbf{Hyper-parameters:} the grid is small and was selected on seed~0; extensions reuse the settings of their base models, which favors neither side. \textbf{Confidence reliability:} softmax confidence is not guaranteed to be calibrated \cite{guo2017calibration}.
+
+\section{Conclusion}
+We studied confidence-aware message passing for social bot detection, from a parameter-free Confidence-Aware GCN to an adaptive family with learnable exponents, agreement weights and confidence-based self-training, under a rigorous protocol with repeated cross-validation, paired tests, a threshold-matched comparison and ablations. The study yields a clear, positive design recipe: \emph{build the similarity graph from account metadata and use an aggregator that keeps a node's own features}. With this recipe GraphSAGE reaches F1 0.840 and AUROC 0.921, 9.9 F1 points above the original GCN pipeline and 3.2 points above a strong feature-only MLP, and with only a few hundred labels confidence-based self-training on top of it gives the best detector. Confidence-weighted aggregation itself is correct, cheap and, in its adaptive form, as accurate as its baselines, but it does not improve them: its weights stay close to uniform and, when free to grow, the learned exponents shrink. The earlier single-split precision gain was sampling noise. We hope that the released code and per-run data help others to evaluate aggregation changes with repeated splits and to pay attention to how the graph is built.
+
+\section{Future Work}
+Three directions follow directly from these results. First, the confidence signal itself could be made more reliable, e.g.\ by temperature scaling or an ensemble estimate before it is used as a weight or a pseudo-label filter \cite{guo2017calibration}. Second, graph construction could be learned rather than fixed, for example by selecting the metadata and text features that define neighborhoods on the validation set or by jointly learning the graph and the classifier. Third, evaluation on multi-relational graphs with explicit follow, mention, reply and retweet edges such as TwiBot-20 \cite{feng2021twibot20}, with heterogeneous architectures such as BotRGCN \cite{feng2021botrgcn}, would show whether these conclusions transfer from similarity graphs to real social graphs.
+
+\section*{Code and Data Availability}
+All code, configurations, per-run results (CSV), predicted probabilities and the scripts that generate every table and figure in this paper are available at \url{https://github.com/solodancer235-star/confidence-aware-gcn-bot-detection}. The full protocol, including the extensions, runs on a two-core CPU in about five hours.
+
+\section*{Acknowledgments}
+The author thanks the School of Software Engineering at Astana IT University for guidance throughout the design and evaluation of this work.
+
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}
