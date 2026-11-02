@@ -18,3 +18,8 @@ paper_csimq/*.out
 paper_csimq/*.bbl
 paper_csimq/*.blg
 paper_csimq/*.synctex.gz
+paper_dg2027/*.aux
+paper_dg2027/*.log
+paper_dg2027/*.out
+paper_dg2027/*.bbl
+paper_dg2027/*.blg
